@@ -82,7 +82,7 @@ def read_fit_to_df(activity_id) -> pd.DataFrame:
     # Convert to DataFrame
     df = pd.DataFrame(records)
     df["enhanced_speed"] = df["enhanced_speed"].values * 3.6 #kmh
-    df["enhanced_speed"] = uniform_filter1d(df["enhanced_speed"], size = 5) #smoothing
+    #df["enhanced_speed"] = uniform_filter1d(df["enhanced_speed"], size = 3) #smoothing
 
     # Preview (debugging)
     #print(df)
@@ -125,7 +125,7 @@ def summarize_intervals(intervals,df):
     intervals_summary=[]
     for interval in intervals:
         interval_summary = {"duration [min]": round((interval[1] - interval[0])/60),
-                            "avg speed [kmh]": round(float(df.loc[interval[0]:interval[1], "enhanced_speed"].mean()),2) * 3.6,
+                            "avg speed [kmh]": round(float(df.loc[interval[0]:interval[1], "enhanced_speed"].mean()),2),
                             "avg heart_rate [bpm]": round(float(df.loc[interval[0]:interval[1], "heart_rate"].mean())),
                             "distance [m]": round(float(df.loc[interval[1], "distance"] - df.loc[interval[0], "distance"]))}
         intervals_summary.append(interval_summary)
@@ -151,13 +151,13 @@ def detect_intervals_improved(df, min_interval_duration=30, min_recovery_duratio
     """
     print(f'detect_intervals_improved(df)')
 
-    # Convert speed to km/h and smooth the data
-    speed_kmh = df["enhanced_speed"].values * 3.6
+    # Convert rfrspeed to km/h ansdcsdcd smooth the data
+    speed_kmh = df["enhanced_speed"].values
     smoothed_speed = uniform_filter1d(speed_kmh, size=5)  # 5-point moving average
 
     # Calculate speed derivatives for better transition detection
     speed_gradient = np.gradient(smoothed_speed)
-
+dddddd
     # Adaptive thresholds based on data characteristics
     if adaptive_threshold:
         speed_mean = np.mean(smoothed_speed)
