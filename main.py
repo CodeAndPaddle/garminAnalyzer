@@ -7,13 +7,12 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.ndimage import uniform_filter1d
 
-
-
-# This is a sample Python script.
-
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
-
+#consnt
+SPEED_THRESHOLD = 4
+ENHANCED_SPEED = 'enhanced_speed'
+MINIMUM_INTERVAL_LENGTH = 15
+MINIMUM_INTERVAL_SPEED = 12.5
+MINIMUM_INTERVAL_HR = 150
 
 def print_hi(name):
     # Use a breakpoint in the code line below to debug your script.
@@ -81,53 +80,103 @@ def read_fit_to_df(activity_id) -> pd.DataFrame:
 
     # Convert to DataFrame
     df = pd.DataFrame(records)
-    df["enhanced_speed"] = df["enhanced_speed"].values * 3.6 #kmh
+    df["enhanced_speed"] = df["enhanced_speed"].astype(float) * 3.6 #kmh
+    df["enhanced_speed"] = df["enhanced_speed"].interpolate()
     df["enhanced_speed"] = uniform_filter1d(df["enhanced_speed"], size = 5) #smoothing
+    df["heart_rate"] = df["heart_rate"].interpolate()
 
     # Preview (debugging)
     #print(df)
 
     return df
-
-def detect_intervals(df) :
+#recursive solution
+def detect_intervals(df,interval=None) :
     print(f'detect_intervals(df)')
-    intervals= []
-    duration = len(df)
-    index = 0
+    if interval is None:
+        intervals = []
+        start = 0
+        end = len(df)
+    else:
+        start, end = interval
+
+    avg_speed = float(df[start:end,'enhanced_speed'].mean())
+    max_speed = float(df[start:end,'enhanced_speed'].max())
+    if max_speed - avg_speed < SPEED_THRESHOLD:
+        return []
+
+    intervals = []
+    interval_tmp = []
     in_interval = False
-    start_interval = 0
-
-    while index < duration-10 : # the threshold is defined to be speed[time+10]-time > 5 & speed[[time+10] > 12kmh
-        current_speed = df["enhanced_speed"].iloc[index]
-        future_speed = df["enhanced_speed"].iloc[index + 10]
-        #print(f"{index}: current={current_speed:.2f}, future={future_speed:.2f}")
-
-        if not in_interval :
-            # start_interval
-            if (future_speed - current_speed) > 5 and future_speed > 11:
-                start_interval = index + 5 # the middle is set to be the start
+    for index, row in df[start:end].iterrows():
+        if not in_interval:
+            if row['enhanced_speed'] >= avg_speed:
+                interval_tmp.append(index)
                 in_interval = True
-        else:
-            if index+10 == duration:
-                end_interval = duration
-                intervals.append((start_interval, end_interval))
+            continue
 
-            if (current_speed - future_speed ) > 5 and future_speed < 11:
-                end_interval = index + 5  # the middle is set to be the end
-                in_interval = False
-                intervals.append((start_interval, end_interval))
-        index += 1
-    print(f"{intervals} detect_intervals")
-    return intervals
+        if row['enhanced_speed'] <= avg_speed:
+            interval_tmp.append(index)
+            in_interval = False
+            intervals.append(interval_tmp)
+            interval_tmp = []
+    if in_interval:
+        interval_tmp.append(end)
+        intervals.append(interval_tmp)
+    res = []
+    for interval in intervals:
+        rec = detect_intervals(df, interval)
+        if len(rec) > 1:
+            res.extend(rec)
+        else:
+            res.append(interval)
+
+
+
+def detect_intervals2(df):
+    def detect_intervals_inner(start, end):
+        avg_speed = float(df.iloc[start:end][ ENHANCED_SPEED].mean())
+        max_speed = float(df.iloc[start:end][ ENHANCED_SPEED].max())
+        if max_speed - avg_speed < SPEED_THRESHOLD:
+            return []
+        i = start
+        intervals = []
+        while i < end:
+            for _, row in df.iloc[i:end].iterrows():
+                if row[ENHANCED_SPEED] >= avg_speed :
+                    break
+                i += 1
+
+            left = i
+            i += MINIMUM_INTERVAL_LENGTH
+            for _, row in df.iloc[i:end].iterrows():
+                if row[ENHANCED_SPEED] <= avg_speed:
+                    break
+                i += 1
+            right = i
+            if right >= end:
+                right = end - 1
+            rec = detect_intervals_inner(left, right)
+            if len(rec) > 1:
+                intervals.extend(rec)
+            else:
+                intervals.append([left, right])
+
+        return intervals
+
+    return detect_intervals_inner(0, len(df))
+
+
 
 def summarize_intervals(intervals,df):
     print(f'summarize_intervals')
     intervals_summary=[]
     for interval in intervals:
-        interval_summary = {"duration [min]": round((interval[1] - interval[0])/60),
-                            "avg speed [kmh]": round(float(df.loc[interval[0]:interval[1], "enhanced_speed"].mean()),2) * 3.6,
-                            "avg heart_rate [bpm]": round(float(df.loc[interval[0]:interval[1], "heart_rate"].mean())),
-                            "distance [m]": round(float(df.loc[interval[1], "distance"] - df.loc[interval[0], "distance"]))}
+        left , right = interval
+        print(f"left: {left}, right: {right}, slice length: {len(df.loc[left:right])}")
+        interval_summary = {"duration [min]": round((right - left)/60),
+                            "avg speed [kmh]": round(float(df.loc[left:right, "enhanced_speed"].mean()),2),
+                            "avg heart_rate [bpm]": round(float(df.loc[left:right, "heart_rate"].mean())),
+                            "distance [m]": round(float(df.loc[right, "distance"] - df.loc[left, "distance"]))}
         intervals_summary.append(interval_summary)
     return intervals_summary
 
@@ -135,7 +184,7 @@ def plot_intervals(intervals_summary):
     print(f'plot_intervals(intervals_summary){len(intervals_summary)}')
     df = pd.DataFrame(intervals_summary)
     df.insert(0, "interval", range(1, len(df) + 1))
-    print(df)
+    print(df[df["avg heart_rate [bpm]"] > MINIMUM_INTERVAL_HR])
 
 def detect_intervals_improved(df, min_interval_duration=30, min_recovery_duration=15,
                               speed_threshold=11, adaptive_threshold=True):
@@ -152,16 +201,15 @@ def detect_intervals_improved(df, min_interval_duration=30, min_recovery_duratio
     print(f'detect_intervals_improved(df)')
 
     # Convert speed to km/h and smooth the data
-    speed_kmh = df["enhanced_speed"].values * 3.6
-    smoothed_speed = uniform_filter1d(speed_kmh, size=5)  # 5-point moving average
+    speed_kmh = df["enhanced_speed"].values
 
     # Calculate speed derivatives for better transition detection
-    speed_gradient = np.gradient(smoothed_speed)
+    speed_gradient = np.gradient(speed_kmh)
 
     # Adaptive thresholds based on data characteristics
     if adaptive_threshold:
-        speed_mean = np.mean(smoothed_speed)
-        speed_std = np.std(smoothed_speed)
+        speed_mean = np.mean(speed_kmh)
+        speed_std = np.std(speed_kmh)
         high_speed_threshold = max(speed_threshold, speed_mean + 0.5 * speed_std)
         low_speed_threshold = speed_mean - 0.3 * speed_std
         acceleration_threshold = 0.3 * speed_std  # Adaptive acceleration threshold
@@ -174,20 +222,20 @@ def detect_intervals_improved(df, min_interval_duration=30, min_recovery_duratio
     duration = len(df)
 
     # Method 1: Peak-based detection for clear intervals
-    peaks, _ = find_peaks(smoothed_speed, height=high_speed_threshold, distance=min_interval_duration)
+    peaks, _ = find_peaks(speed_kmh, height=high_speed_threshold, distance=min_interval_duration)
 
     if len(peaks) > 0:
         intervals_from_peaks = extract_intervals_from_peaks(
-            smoothed_speed, speed_gradient, peaks,
+            speed_kmh, speed_gradient, peaks,
             high_speed_threshold, low_speed_threshold,
             min_interval_duration, min_recovery_duration
         )
         intervals.extend(intervals_from_peaks)
 
     # Method 2: State machine approach for gradual transitions
-    if len(intervals) == 0 or should_use_state_machine(smoothed_speed, intervals):
+    if len(intervals) == 0 or should_use_state_machine(speed_kmh, intervals):
         intervals_from_state = state_machine_detection(
-            smoothed_speed, speed_gradient,
+            speed_kmh, speed_gradient,
             high_speed_threshold, low_speed_threshold, acceleration_threshold,
             min_interval_duration, min_recovery_duration
         )
@@ -196,7 +244,7 @@ def detect_intervals_improved(df, min_interval_duration=30, min_recovery_duratio
     # Method 3: Relative intensity detection (fallback)
     if len(intervals) == 0:
         intervals = relative_intensity_detection(
-            smoothed_speed, min_interval_duration, min_recovery_duration
+            speed_kmh, min_interval_duration, min_recovery_duration
         )
 
     # Post-process intervals
@@ -433,7 +481,8 @@ if __name__ == '__main__':
     #Activity_ID = get_activity_from_garmin_connect()
     #Data_frame = read_fit_to_df(Activity_ID)
     Data_frame = read_fit_to_df("19497947581")
-    Intervals = detect_intervals(Data_frame)
+    Intervals = detect_intervals2(Data_frame)
+    print(Intervals)
     Intervals_summary = summarize_intervals(Intervals,Data_frame)
     plot_intervals(Intervals_summary)
 
