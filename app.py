@@ -106,15 +106,52 @@ def read_fit_to_df_from_data(fit_data):
     return df
 
 
+# def summarize_intervals(intervals, df):
+#     summary = []
+#     recovery = len(intervals)-1
+#     for i in range(1,recovery*2,2): # add recovery times in the odd slots
+#         recovery_time = [intervals[i+1][0],intervals[i-1][1]] #[right left]
+#         intervals.insert(i, recovery_time)
+#
+#     for index, (left, right) in enumerate(intervals):
+#         action_type = "Interval" if index % 2 == 0 else "Recovery"
+#         summary.append({
+#             "Type": action_type,
+#             "duration [min]": round((right - left) / 60),
+#             "avg speed [kmh]": round(df.loc[left:right, "enhanced_speed"].mean(), 2),
+#             "distance [m]": round(df.loc[right, "distance"] - df.loc[left, "distance"],),
+#             "avg heart_rate[bpm]": round(df.loc[left:right, "heart_rate"].mean())
+#         })
+#     return summary
+
+
 def summarize_intervals(intervals, df):
     summary = []
-    for left, right in intervals:
+
+    for i, (left, right) in enumerate(intervals):
+        # Add the interval
         summary.append({
-            "duration [min]": round((right - left) / 60),
+            "Type": "Interval",
+            "duration [min]": round((right - left) / 60, ),
             "avg speed [kmh]": round(df.loc[left:right, "enhanced_speed"].mean(), 2),
-            "avg heart_rate [bpm]": round(df.loc[left:right, "heart_rate"].mean()),
-            "distance [m]": round(df.loc[right, "distance"] - df.loc[left, "distance"])
+            "distance [m]": round(df.loc[right, "distance"] - df.loc[left, "distance"]),
+            "avg heart_rate [bpm]": round(df.loc[left:right, "heart_rate"].mean())
         })
+
+        # Add recovery period (if not the last interval)
+        if i < len(intervals) - 1:
+            recovery_start = right
+            recovery_end = intervals[i + 1][0]
+
+            if recovery_start < recovery_end:  # Valid recovery period
+                summary.append({
+                    "Type": "Recovery",
+                    "duration [min]": round((recovery_end - recovery_start) / 60, ),
+                    "avg speed [kmh]": round(df.loc[recovery_start:recovery_end, "enhanced_speed"].mean(), 2),
+                    "distance [m]": round(df.loc[recovery_end, "distance"] - df.loc[recovery_start, "distance"]),
+                    "avg heart_rate [bpm]": round(df.loc[recovery_start:recovery_end, "heart_rate"].mean())
+                })
+
     return summary
 
 # ========== Streamlit App ==========
