@@ -6,20 +6,18 @@ from garminconnect import Garmin
 from fitparse import FitFile
 from scipy.ndimage import uniform_filter1d
 import detect_intervals
+import altair as alt
 
 # Constants
 SPEED_THRESHOLD = 3
 ENHANCED_SPEED = 'enhanced_speed'
 MINIMUM_INTERVAL_HR = 150
 
-def get_fit_file(email, password):
-    try:
-        client = Garmin(email, password)
-        client.login()
-    except Exception as e:
-        st.error("Login failed. Please check your Garmin email and password.")
-        st.stop()
+# Initialize session state
+if "login_failed" not in st.session_state:
+    st.session_state.login_failed = False
 
+def get_fit_file(client):
     activities = client.get_activities(0, 1)
     activityID = activities[0]['activityId']
     fit_file = client.download_activity(activityID, dl_fmt=client.ActivityDownloadFormat.ORIGINAL)
@@ -71,17 +69,31 @@ with st.form("login_form"):
     email = st.text_input("Garmin Email")
     password = st.text_input("Garmin Password", type="password")
     submit = st.form_submit_button("Analyze My Activity")
+
     if st.session_state.login_failed:
         st.error("Login failed. Please check your email and password.")
+
 if submit:
     try:
-        st.info("Logging into Garmin and downloading your latest activity...")
-        activity_id = get_fit_file(email, password)
+        with st.spinner("Logging into Garmin..."):
+            client = Garmin(email, password)
+            client.login()
+        st.session_state.login_failed = False
+
+        activity_id = get_fit_file(client)
         df = read_fit_to_df(activity_id)
 
         st.success("Activity data loaded!")
-
-        st.line_chart(df[["enhanced_speed", "heart_rate"]])
+        # building the chart
+        chart_df = df.reset_index().melt(id_vars="index", value_vars=["enhanced_speed", "heart_rate"],
+                                         var_name="Metric", value_name="Value")
+        color_map = alt.Scale(domain=["enhanced_speed", "heart_rate"], range=["blue", "red"])
+        chart = alt.Chart(chart_df).mark_line().encode(
+            x='index',
+            y='Value',
+            color=alt.Color('Metric', scale=color_map)
+        ).properties(height=300)
+        st.altair_chart(chart, use_container_width=True)
 
         st.info("Detecting intervals...")
         intervals = detect_intervals.detect_speed_intervals(df, ENHANCED_SPEED, 0.5, 10)
@@ -96,4 +108,5 @@ if submit:
         st.dataframe(summary_df[summary_df["avg heart_rate [bpm]"] > MINIMUM_INTERVAL_HR])
 
     except Exception as e:
-        st.error(f"Something went wrong: {e}")
+        st.session_state.login_failed = True
+        st.error("Login failed. Please check your Garmin email and password.")
