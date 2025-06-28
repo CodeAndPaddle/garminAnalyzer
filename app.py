@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # Constants
 SPEED_THRESHOLD = 3
 ENHANCED_SPEED = 'enhanced_speed'
-MINIMUM_INTERVAL_HR = 150
+MINIMUM_INTERVAL_HR = 140
 
 # Initialize session state
 if "login_failed" not in st.session_state:
@@ -36,28 +36,6 @@ def get_fit_files(client):
         f.write(fit_data)
 
     return activityID
-
-def read_fit_to_df(activity_id):
-    fitfile = FitFile(f"{activity_id}.fit")
-    records = []
-    for record in fitfile.get_messages('record'):
-        data = {field.name: field.value for field in record if field.name in ("distance", "enhanced_speed", "heart_rate")}
-        records.append(data)
-
-    df = pd.DataFrame(records)
-    df["enhanced_speed"] = df["enhanced_speed"].astype(float) * 3.6
-    df["enhanced_speed"] = df["enhanced_speed"].interpolate()
-    df["enhanced_speed"] = uniform_filter1d(df["enhanced_speed"], size=5)
-    df["heart_rate"] = df["heart_rate"].interpolate()
-    return df
-
-
-import io
-import zipfile
-import pandas as pd
-from fitparse import FitFile
-from scipy.ndimage import uniform_filter1d
-
 
 def read_fit_to_df_from_data(fit_data):
     """Convert FIT data from memory buffer to DataFrame"""
@@ -96,8 +74,8 @@ def read_fit_to_df_from_data(fit_data):
     # Process enhanced_speed (convert m/s to km/h)
     if 'enhanced_speed' in df.columns:
         df["enhanced_speed"] = df["enhanced_speed"].astype(float) * 3.6
-        df["enhanced_speed"] = df["enhanced_speed"].interpolate()
-        df["enhanced_speed"] = uniform_filter1d(df["enhanced_speed"], size=5)
+        df["enhanced_speed"] = df["enhanced_speed"].interpolate().bfill()
+        df["enhanced_speed"] = uniform_filter1d(df["enhanced_speed"], size=7)
 
     # Process heart_rate
     if 'heart_rate' in df.columns:
@@ -105,35 +83,17 @@ def read_fit_to_df_from_data(fit_data):
 
     return df
 
-
-# def summarize_intervals(intervals, df):
-#     summary = []
-#     recovery = len(intervals)-1
-#     for i in range(1,recovery*2,2): # add recovery times in the odd slots
-#         recovery_time = [intervals[i+1][0],intervals[i-1][1]] #[right left]
-#         intervals.insert(i, recovery_time)
-#
-#     for index, (left, right) in enumerate(intervals):
-#         action_type = "Interval" if index % 2 == 0 else "Recovery"
-#         summary.append({
-#             "Type": action_type,
-#             "duration [min]": round((right - left) / 60),
-#             "avg speed [kmh]": round(df.loc[left:right, "enhanced_speed"].mean(), 2),
-#             "distance [m]": round(df.loc[right, "distance"] - df.loc[left, "distance"],),
-#             "avg heart_rate[bpm]": round(df.loc[left:right, "heart_rate"].mean())
-#         })
-#     return summary
-
-
 def summarize_intervals(intervals, df):
     summary = []
 
     for i, (left, right) in enumerate(intervals):
+        min = (right - left) // 60
+        sec = (right - left) %60
         # Add the interval
         summary.append({
-            "Type": "Interval",
-            "duration [min]": round((right - left) / 60, ),
-            "avg speed [kmh]": round(df.loc[left:right, "enhanced_speed"].mean(), 2),
+            "Type": f"Interval : {i+1}",
+            "duration [min]": f"{min:02d}:{sec:02d}",
+            "avg speed [kmh]": f"{round(df.loc[left:right, "enhanced_speed"].mean(), 2):.2f}",
             "distance [m]": round(df.loc[right, "distance"] - df.loc[left, "distance"]),
             "avg heart_rate [bpm]": round(df.loc[left:right, "heart_rate"].mean())
         })
@@ -146,8 +106,8 @@ def summarize_intervals(intervals, df):
             if recovery_start < recovery_end:  # Valid recovery period
                 summary.append({
                     "Type": "Recovery",
-                    "duration [min]": round((recovery_end - recovery_start) / 60, ),
-                    "avg speed [kmh]": round(df.loc[recovery_start:recovery_end, "enhanced_speed"].mean(), 2),
+                    "duration [min]": f"{(recovery_end-recovery_start)//60:02d}:{(recovery_end-recovery_start)%60:02d}",
+                    "avg speed [kmh]": f"{round(df.loc[recovery_start:recovery_end, "enhanced_speed"].mean(), 2):.2f}",
                     "distance [m]": round(df.loc[recovery_end, "distance"] - df.loc[recovery_start, "distance"]),
                     "avg heart_rate [bpm]": round(df.loc[recovery_start:recovery_end, "heart_rate"].mean())
                 })
@@ -157,7 +117,7 @@ def summarize_intervals(intervals, df):
 # ========== Streamlit App ==========
 
 st.title("Garmin Interval Analyzer")
-st.write("Login to Garmin and choose an activity from the last week to analyze.")
+st.write("Login to Garmin and choose an activity from the last 7 days to analyze.")
 
 # Initialize session state
 if 'client' not in st.session_state:
@@ -217,9 +177,10 @@ elif st.session_state.activities is not None and len(st.session_state.activities
 
         # Format duration (convert from seconds)
         duration_min = int(duration / 60) if duration else 0
+        duration_sec = duration - (duration_min * 60)
         distance_km = round(distance / 1000, 2) if distance else 0
 
-        display_text = f"{activity_name} ({activity_type}) - {start_time[:10]} - {duration_min}min - {distance_km}km"
+        display_text = f"{activity_name} ({activity_type}) - {start_time[:10]} - {duration_min}min:{duration_sec}sec - {distance_km}km"
         activity_options.append((display_text, i))
 
     # Activity selection
@@ -259,34 +220,45 @@ elif st.session_state.activities is not None and len(st.session_state.activities
                 )
 
                 # Convert to DataFrame
-                df = read_fit_to_df_from_data(fit_data)  # You'll need to modify this function
+                df = read_fit_to_df_from_data(fit_data)
 
             st.success("Activity data loaded!")
 
             # Building the chart
+            intervals = detect_intervals.detect_speed_intervals(df, ENHANCED_SPEED, 0.5, 10)
             chart_df = df.reset_index().melt(
                 id_vars="index",
                 value_vars=["enhanced_speed", "heart_rate"],
                 var_name="Metric",
                 value_name="Value"
             )
+            # Create DataFrame of intervals
+            interval_df = pd.DataFrame(intervals, columns=["start", "end"])
+
+            # Build yellow rectangles
+            interval_layer = alt.Chart(interval_df).mark_rect(opacity=0.5, color="yellow").encode(
+                x="start:Q",
+                x2="end:Q"
+            )
+
             color_map = alt.Scale(domain=["enhanced_speed", "heart_rate"], range=["blue", "red"])
             chart = alt.Chart(chart_df).mark_line().encode(
-                x='index',
+                x=alt.X('index', title='Time [s]'),
                 y='Value',
                 color=alt.Color('Metric', scale=color_map)
             ).properties(height=300)
-            st.altair_chart(chart, use_container_width=True)
+
+            # Combine the chart with intervals
+            final_chart = interval_layer + chart
+            st.altair_chart(final_chart, use_container_width=True)
 
             st.info("Detecting intervals...")
-            intervals = detect_intervals.detect_speed_intervals(df, ENHANCED_SPEED, 0.5, 10)
+
             summary = summarize_intervals(intervals, df)
 
             st.subheader("Detected Intervals")
             summary_df = pd.DataFrame(summary)
-            summary_df.index += 1
-            st.dataframe(summary_df)
-
+            st.dataframe(summary_df.style.hide(axis='index'), use_container_width=True)
 
         except Exception as e:
             st.error(f"Error analyzing activity: {str(e)}")
@@ -306,3 +278,4 @@ elif st.session_state.activities is not None and len(st.session_state.activities
         st.session_state.activities = None
         st.session_state.login_failed = False
         st.rerun()
+

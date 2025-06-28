@@ -76,32 +76,23 @@ def detect_speed_intervals(df, speed_column, threshold_acc=0.5, window_size=10):
         if np.mean(interval_speeds) > avg_speed:
             intervals.append([start, end])
 
-    return intervals
+    # Merge intervals less than 15 seconds
+    def merge_close_intervals(intervals, min_gap=15):
+        if not intervals:
+            return []
 
+        merged = [intervals[0]]
 
-# # Example usage and testing function
-# def test_algorithm():
-#     # Create sample data
-#     time_points = np.linspace(0, 100, 1000)
-#     # Simulate speed data with acceleration/deceleration periods
-#     speeds = 30 + 10 * np.sin(0.1 * time_points) + 5 * np.random.normal(0, 1, 1000)
-#
-#     # Add some clear acceleration/deceleration intervals
-#     speeds[200:300] += 20  # High speed interval
-#     speeds[500:600] += 15  # Another high speed interval
-#
-#     df = pd.DataFrame({
-#         'time': time_points,
-#         'speed': speeds
-#     })
-#
-#     intervals = detect_speed_intervals(df, 'speed', threshold_acc=0.5, window_size=10)
-#
-#     print("Detected intervals:")
-#     for i, (start, end) in enumerate(intervals):
-#         avg_speed_interval = np.mean(df['speed'].iloc[start:end + 1])
-#         print(f"Interval {i + 1}: [{start}, {end}] - Avg Speed: {avg_speed_interval:.2f}")
-#
-#     return intervals
+        for start, end in intervals[1:]:
+            last_start, last_end = merged[-1]
+            if start - last_end < min_gap:
+                # Merge with the previous
+                merged[-1] = [last_start, end]
+            else:
+                merged.append([start, end])
+
+        return merged
+
+    return merge_close_intervals(intervals)
 
 
