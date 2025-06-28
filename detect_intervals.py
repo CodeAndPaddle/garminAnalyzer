@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 
 
-def detect_speed_intervals(df, speed_column, threshold_acc=0.5, window_size=10):
+def detect_speed_intervals(df, speed_column, threshold_acc=0.5, window_size=15):
     """
     Detect intervals of high-speed periods based on acceleration/deceleration patterns.
 

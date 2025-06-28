@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # Constants
 SPEED_THRESHOLD = 3
 ENHANCED_SPEED = 'enhanced_speed'
-MINIMUM_INTERVAL_HR = 140
+MINIMUM_INTERVAL_HR = 130
 
 # Initialize session state
 if "login_failed" not in st.session_state:
@@ -258,6 +258,7 @@ elif st.session_state.activities is not None and len(st.session_state.activities
 
             st.subheader("Detected Intervals")
             summary_df = pd.DataFrame(summary)
+            summary_df.reset_index(drop=True, inplace=True)
             st.dataframe(summary_df.style.hide(axis='index'), use_container_width=True)
 
         except Exception as e:

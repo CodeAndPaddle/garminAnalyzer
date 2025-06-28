@@ -3,8 +3,6 @@ import zipfile
 import io
 from garminconnect import Garmin
 from fitparse import FitFile
-import numpy as np
-from scipy.signal import find_peaks
 from scipy.ndimage import uniform_filter1d
 import detect_intervals
 
@@ -13,7 +11,7 @@ SPEED_THRESHOLD = 3
 ENHANCED_SPEED = 'enhanced_speed'
 MINIMUM_INTERVAL_LENGTH = 60
 MINIMUM_INTERVAL_SPEED = 12.5
-MINIMUM_INTERVAL_HR = 150
+MINIMUM_INTERVAL_HR = 140
 
 def print_hi(name):
     # Use a breakpoint in the code line below to debug your script.
@@ -90,81 +88,6 @@ def read_fit_to_df(activity_id) -> pd.DataFrame:
     #print(df)
 
     return df
-#recursive solution
-def detect_intervals4(df,interval=None) :
-    print(f'detect_intervals(df)')
-    if interval is None:
-        intervals = []
-        start = 0
-        end = len(df)
-    else:
-        start, end = interval
-
-    avg_speed = float(df[start:end,'enhanced_speed'].mean())
-    max_speed = float(df[start:end,'enhanced_speed'].max())
-    if max_speed - avg_speed < SPEED_THRESHOLD:
-        return []
-
-    intervals = []
-    interval_tmp = []
-    in_interval = False
-    for index, row in df[start:end].iterrows():
-        if not in_interval:
-            if row['enhanced_speed'] >= avg_speed:
-                interval_tmp.append(index)
-                in_interval = True
-            continue
-
-        if row['enhanced_speed'] <= avg_speed:
-            interval_tmp.append(index)
-            in_interval = False
-            intervals.append(interval_tmp)
-            interval_tmp = []
-    if in_interval:
-        interval_tmp.append(end)
-        intervals.append(interval_tmp)
-    res = []
-    for interval in intervals:
-        rec = detect_intervals(df, interval)
-        if len(rec) > 1:
-            res.extend(rec)
-        else:
-            res.append(interval)
-
-
-
-def detect_intervals2(df):
-    def detect_intervals_inner(start, end):
-        avg_speed = float(df.iloc[start:end][ ENHANCED_SPEED].mean())
-        max_speed = float(df.iloc[start:end][ ENHANCED_SPEED].max())
-        if max_speed - avg_speed < SPEED_THRESHOLD:
-            return []
-        i = start
-        intervals = []
-        while i < end:
-            for _, row in df.iloc[i:end].iterrows():
-                if row[ENHANCED_SPEED] >= avg_speed :
-                    break
-                i += 1
-
-            left = i
-            i += MINIMUM_INTERVAL_LENGTH
-            for _, row in df.iloc[i:end].iterrows():
-                if row[ENHANCED_SPEED] <= avg_speed:
-                    break
-                i += 1
-            right = i
-            if right >= end:
-                right = end - 1
-            rec = detect_intervals_inner(left, right)
-            if len(rec) > 1:
-                intervals.extend(rec)
-            else:
-                intervals.append([left, right])
-
-        return intervals
-
-    return detect_intervals_inner(0, len(df))
 
 def summarize_intervals(intervals,df):
     print(f'summarize_intervals')
