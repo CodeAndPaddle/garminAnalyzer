@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 # Constants
 SPEED_THRESHOLD = 3
 ENHANCED_SPEED = 'enhanced_speed'
-MINIMUM_INTERVAL_HR = 130
+MINIMUM_INTERVAL_HR = 100
 
 # Initialize session state
 if "login_failed" not in st.session_state:
