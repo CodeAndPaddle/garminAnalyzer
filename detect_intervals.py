@@ -16,10 +16,11 @@ def detect_speed_intervals(df, speed_column, threshold_acc=0.5, window_size=15):
     - List of [start_idx, end_idx] intervals
     """
     speeds = df[speed_column].values
+    elapsed_seconds = df['elapsed_seconds'].values
     avg_speed = np.mean(speeds)
 
     # Calculate acceleration using gradient
-    acceleration = np.gradient(speeds)
+    acceleration = np.gradient(speeds,elapsed_seconds)
 
     intervals = []
     start, end = -1, -1

@@ -64,7 +64,7 @@ def read_fit_to_df_from_data(fit_data):
         data_dict = {
             field.name: field.value
             for field in record
-            if field.name in ("distance", "enhanced_speed", "heart_rate")
+            if field.name in ("timestamp","distance", "enhanced_speed", "heart_rate")
         }
         records.append(data_dict)
 
@@ -80,6 +80,24 @@ def read_fit_to_df_from_data(fit_data):
     # Process heart_rate
     if 'heart_rate' in df.columns:
         df["heart_rate"] = df["heart_rate"].interpolate()
+
+    #process timestamp
+    if 'timestamp' in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df["elapsed_seconds"] = df["timestamp"] - df["timestamp"].iloc(0).dt.total_seconds()
+
+    # for debugging purposes
+    # Calculate delta distance and delta time using forward difference
+    delta_distance = df['distance'].shift(-1) - df['distance']
+    delta_time = df['elapsed_seconds'].shift(-1) - df['elapsed_seconds']
+
+    # Calculate speed (km/s or m/s depending on distance units)
+    df['calculated_speed'] = delta_distance / delta_time
+
+    # Optional: convert to km/h if distance is in meters
+    df['calculated_speed'] *= 3.6
+
+    df.loc[df.index[-1], 'calculated_speed'] = df.loc[df.index[-2], 'calculated_speed']
 
     return df
 
